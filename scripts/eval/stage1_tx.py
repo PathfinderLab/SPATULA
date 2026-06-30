@@ -191,34 +191,51 @@ def _prepare_input(hvg_raw: np.ndarray, vocab_keep: np.ndarray | None,
     return x.astype(np.float32, copy=False)
 
 
+
+def _safe_eval_batch(requested: int, x_norm: np.ndarray) -> int:
+    """Clamp eval batch from observed clean sequence length before CUDA alloc."""
+    requested = max(1, int(requested))
+    if x_norm.size == 0:
+        return requested
+    nz = (x_norm != 0).sum(axis=1)
+    p95 = int(np.percentile(nz, 95)) if nz.size else 0
+    if p95 >= 4096:
+        cap = 1
+    elif p95 >= 2048:
+        cap = 2
+    elif p95 >= 1024:
+        cap = 4
+    elif p95 >= 512:
+        cap = 8
+    else:
+        cap = 16
+    return max(1, min(requested, cap))
+
+
 @torch.no_grad()
 def encode_pool(enc, hvg: np.ndarray, vocab_keep: np.ndarray | None,
                   normalizer: GeneNormalizer | None,
                   batch: int = 64, device: str = "cuda") -> np.ndarray:
-    """Encode an (N, D_full) raw-log1p pool using memory-safe micro-batches.
-
-    Evaluation batch size is only a throughput knob.  Larger Stage-1 capacity
-    profiles can OOM at the old default (256), so we retry with half-sized
-    batches when CUDA memory is exhausted.
-    """
+    """Encode an (N, D_full) raw-log1p pool using memory-safe micro-batches."""
     x_norm = _prepare_input(hvg, vocab_keep, normalizer)
-    cur_batch = max(1, int(batch))
-    while True:
-        out = []
+    cur_batch = _safe_eval_batch(batch, x_norm)
+    if cur_batch < max(1, int(batch)):
+        log.info("encode_pool auto-clamped encode_batch=%s -> %s for long clean sequences", batch, cur_batch)
+    out = []
+    r0 = 0
+    while r0 < x_norm.shape[0]:
         try:
-            for r0 in range(0, x_norm.shape[0], cur_batch):
-                x = torch.from_numpy(x_norm[r0:r0+cur_batch]).to(device)
-                out.append(enc(novae_latent=None, hvg=x)["h_tx"].cpu().numpy())
-            return np.concatenate(out, axis=0)
+            x = torch.from_numpy(x_norm[r0:r0 + cur_batch]).to(device)
+            out.append(enc(novae_latent=None, hvg=x)["h_tx"].cpu().numpy())
+            r0 += cur_batch
         except torch.cuda.OutOfMemoryError:
             if device.startswith("cuda"):
                 torch.cuda.empty_cache()
             if cur_batch <= 1:
                 raise
-            new_batch = max(1, cur_batch // 2)
-            log.warning(f"encode_pool OOM at batch={cur_batch}; retrying with batch={new_batch}")
-            cur_batch = new_batch
-
+            cur_batch = max(1, cur_batch // 2)
+            log.warning("encode_pool OOM; retrying with batch=%d", cur_batch)
+    return np.concatenate(out, axis=0)
 
 def linear_probe(X: np.ndarray, y: np.ndarray, cv: int = 5) -> dict:
     """5-fold linear-probe top-1 acc + macro-F1.
@@ -273,7 +290,7 @@ def masked_value_imputation(enc, hvg_raw: np.ndarray,
                               vocab_keep: np.ndarray | None,
                               normalizer: GeneNormalizer | None,
                               mask_ratio: float = 0.30,
-                              batch: int = 256, device: str = "cuda") -> dict:
+                              batch: int = 16, device: str = "cuda") -> dict:
     """MVM as DOWNSTREAM task — pipeline-aware version.
 
     Pipeline (matches Stage 1 training exactly):
@@ -292,25 +309,37 @@ def masked_value_imputation(enc, hvg_raw: np.ndarray,
                 "mvm_mse_per_tok": float("nan"), "mvm_rmse_norm": float("nan")}
     x_full = _prepare_input(hvg_raw, vocab_keep, normalizer)         # (N, D_eff)
     pred_all, tgt_all = [], []
-    for r0 in range(0, x_full.shape[0], batch):
-        x = torch.from_numpy(x_full[r0:r0+batch]).to(device)
-        nz = (x != 0)               # nonzero in normalised space — nonzero_z preserves zeros
-        rand = torch.rand_like(x.float())
-        mask_pos = nz & (rand < mask_ratio)
-        x_masked = torch.where(mask_pos, torch.zeros_like(x), x)
-        with torch.no_grad():
-            out = enc(novae_latent=None, hvg=x_masked)
-            # Encoder output uses `per_token` (legacy aliased `tx_per_token`).
-            per_tok = out.get("per_token") if out.get("per_token") is not None \
-                       else out.get("tx_per_token")
-            orig_pos = out.get("orig_positions")
-            if per_tok is None or orig_pos is None:
-                return {"mvm_pearson": float("nan"), "mvm_spearman": float("nan"), "mvm_r2": float("nan"),
-                        "mvm_mse_per_tok": float("nan"), "mvm_rmse_norm": float("nan")}
-            val_pred_per_tok = enc.value_head(per_tok).squeeze(-1)
-            val_pred = torch.zeros_like(x).scatter_(1, orig_pos, val_pred_per_tok)
-        pred_all.append(val_pred[mask_pos].cpu().numpy())
-        tgt_all.append(x[mask_pos].cpu().numpy())
+    cur_batch = _safe_eval_batch(batch, x_full)
+    if cur_batch < max(1, int(batch)):
+        log.info("MVM auto-clamped encode_batch=%s -> %s for long clean sequences", batch, cur_batch)
+    r0 = 0
+    while r0 < x_full.shape[0]:
+        try:
+            x = torch.from_numpy(x_full[r0:r0 + cur_batch]).to(device)
+            nz = (x != 0)               # nonzero in normalised space; nonzero_z preserves zeros
+            rand = torch.rand_like(x.float())
+            mask_pos = nz & (rand < mask_ratio)
+            x_masked = torch.where(mask_pos, torch.zeros_like(x), x)
+            with torch.no_grad():
+                out = enc(novae_latent=None, hvg=x_masked)
+                # Encoder output uses `per_token` (legacy aliased `tx_per_token`).
+                per_tok = out.get("per_token") if out.get("per_token") is not None else out.get("tx_per_token")
+                orig_pos = out.get("orig_positions")
+                if per_tok is None or orig_pos is None:
+                    return {"mvm_pearson": float("nan"), "mvm_spearman": float("nan"), "mvm_r2": float("nan"),
+                            "mvm_mse_per_tok": float("nan"), "mvm_rmse_norm": float("nan")}
+                val_pred_per_tok = enc.value_head(per_tok).squeeze(-1)
+                val_pred = torch.zeros_like(x).scatter_(1, orig_pos, val_pred_per_tok)
+            pred_all.append(val_pred[mask_pos].cpu().numpy())
+            tgt_all.append(x[mask_pos].cpu().numpy())
+            r0 += cur_batch
+        except torch.cuda.OutOfMemoryError:
+            if device.startswith("cuda"):
+                torch.cuda.empty_cache()
+            if cur_batch <= 1:
+                raise
+            cur_batch = max(1, cur_batch // 2)
+            log.warning("MVM OOM; retrying with batch=%d", cur_batch)
     if not pred_all or sum(p.size for p in pred_all) < 2:
         return {"mvm_pearson": float("nan"), "mvm_spearman": float("nan"), "mvm_r2": float("nan"),
                 "mvm_mse_per_tok": float("nan"), "mvm_rmse_norm": float("nan")}
@@ -799,6 +828,7 @@ def main():
             enc, hvg_eval,
             n_targets=args.linear_probe_genes,
             max_spots=args.pool_spots,
+            batch_size=_safe_eval_batch(args.encode_batch, hvg_eval),
             seed=0,
             device=device,
             prefix="linear_probe/masked_hvg",
@@ -832,6 +862,7 @@ def main():
                 n_targets=args.linear_probe_genes,
                 gene_folds=int(args.gene_held_out_folds),
                 max_spots=args.pool_spots,
+                batch_size=_safe_eval_batch(args.encode_batch, hvg_eval),
                 seed=0,
                 pca_n=_probe_pca,
                 alpha=_probe_alpha,
@@ -863,7 +894,7 @@ def main():
                 n_chunks=4,
                 chunk_len=min(256, hvg_eval.shape[1]),
                 dynamic=True,
-                batch_size=max(1, min(args.encode_batch, 128)),
+                batch_size=max(1, min(_safe_eval_batch(args.encode_batch, hvg_eval), 16)),
                 max_spots=args.pool_spots,
                 seed=0,
                 device=device,
@@ -937,7 +968,11 @@ def main():
                 row[k.replace("/", "_")] = v
 
         # 5. MVM imputation value-head check                           [downstream reconstruction]
-        row.update(masked_value_imputation(enc, hvg, vocab_keep, normalizer, device=device))
+        row.update(masked_value_imputation(
+            enc, hvg, vocab_keep, normalizer,
+            batch=_safe_eval_batch(args.encode_batch, hvg_eval),
+            device=device,
+        ))
         rows.append(row)
 
     df = pd.DataFrame(rows)
