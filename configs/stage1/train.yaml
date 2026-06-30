@@ -1,0 +1,104 @@
+train:
+  seed: 42
+  output_dir: /workspace/mm_align/results/runs
+
+  mixed_precision: bf16
+  gradient_accumulation_steps: 1
+
+  # ── Batch / loader — Stage 1 is light (no UNI trunk forward) ──
+  # After the aligner.forward fix (gather to masked positions BEFORE
+  # symbol_head), logits memory is (N_masked, V) ≈ 0.15 × B × L × V instead of
+  # the full B × L × V.  With vocab 19,183 + L_max ~5K this brings the head
+  # from 98 GB → ~15 GB at B=1024, which fits on an H100 80 GB.
+  batch_size: 512
+  num_workers: 16          # was 8 — h5 reads CPU-bound after tx_only fix
+  prefetch_factor: 4
+  pin_memory: true
+  persistent_workers: true
+  shuffle: true
+
+  # ── Optimization ──
+  epochs: 100
+  lr: 2.0e-4                          # from-scratch tx encoder → larger lr
+  weight_decay: 0.1
+  max_grad_norm: 1.0
+  min_lr_ratio: 0.05
+  uni_lr_multiplier: 0.1              # unused in Stage 1 (UNI frozen)
+
+  # ── Warmup (cosine-with-warmup scheduler) ──
+  # Priority: warmup_steps > warmup_epochs > warmup_ratio (legacy).
+  # 4.5M train spots / (1024 batch × 8 ranks) ≈ 550 step/epoch.
+  # Setting warmup_epochs=0.5 → ~275 steps of linear ramp, finishing in
+  # the first half of epoch 1.  Then cosine decay over the remaining ~99.5 epochs.
+  # train.py clamps warmup ≤ 1 epoch as a safety net.
+  warmup_epochs: 0.5
+  # warmup_steps: 275          # alternative — absolute, overrides warmup_epochs
+  # warmup_ratio: 0.05         # legacy — over-warmups (0.05 × 100ep = 5ep)
+
+  # ── Perf knobs ──
+  tf32: true
+  uni_gradient_checkpointing: false   # not applicable
+  expandable_segments: true
+  empty_cache_after_eval: true
+  # Stage 1 needs find_unused_parameters=True because tx_self heads only fire
+  # on masked positions (forced by stage1_only logic in train.py).
+  ddp_static_graph: false
+  find_unused_parameters: true
+
+  # ── Validation / eval cadence ────────────────────────────────────
+  # Keep validation loss/MSM top-k every epoch. Expensive scientific monitors
+  # such as HVG linear probes are throttled separately in
+  # configs/stage1/experiment.yaml::experiment.monitor.stage1_quick_every.
+  # CLI override for loss cadence: --val-every-epoch 1
+  val_loss:
+    enable: true
+    max_batches: null                 # null = full validation; use --val-max-batches N for speed
+  val_every_epoch: 1
+
+  # ── Early stop ──
+  early_stopping:
+    enable: true
+    # Select Stage-1 checkpoints by the primary masked-symbol objective.
+    # Composite tx_self/loss can be dominated by auxiliary JEPA/VICReg terms.
+    metric: val/clean_msm/tx_self/masked_symbol_ce
+    mode: min
+    patience: 8                       # bigger than Stage 2 (slower to plateau)
+    min_delta: 1.0e-3
+    save_best_ckpt: true
+
+  # ── Logging ──
+  log_every: 20
+  save_every_epoch: 5
+  keep_last_n_ckpts: 3
+  save_full_ckpt: false
+
+  # ── No gene_stats override (already in data.yaml::gene_norm) ──
+  gene_stats_path: null
+
+  # ── End-of-training eval / test logging ──────────────────────────
+  # Stage 1 test eval writes:
+  #   results/eval/stage1_test_<tag>.csv
+  #   results/runs/<tag>/test_stage1.csv
+  # Use test results as final reporting, not as ablation-selection feedback.
+  final_eval:
+    run_stage1_test: true
+    stage1_test_split: test
+    stage1_test_samples: 76
+    stage1_test_pool_spots: 8000
+    stage1_test_linear_probe_genes: 256
+    stage1_test_include_organ_probe: false
+    stage1_test_skip_source_probe: false
+    # Qualitative artifacts are useful for final reports but cost extra time.
+    # Writes UMAPs, pool barplots, and GT spatial expression panels.
+    stage1_test_make_viz: false
+    stage1_test_viz_max_spots: 5000
+    stage1_test_viz_genes: [MKI67, EPCAM, COL1A1, CD3D]
+    stage1_test_out: results/eval
+    run_zero_shot: false
+    run_linear_probe: false
+
+  wandb:
+    enable: false
+    project: spatula_stage1
+    entity: null
+    run_name: null

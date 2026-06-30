@@ -1,0 +1,60 @@
+# Sweep dedicated to STAGE 2 — VL-JEPA-style multimodal align with the
+# tx encoder loaded from a Stage-1 ckpt and FROZEN.
+#
+# Setup:
+#   - kind=top_hvg_gene   (tx encoder loaded from ckpt_tx_encoder.pt and frozen)
+#   - image_backbone=uni  (UNI ViT-G/14 trunk, LoRA-tuned)
+#   - Trainable params: image LoRA + image projector + tx projector + decoders
+#                        + JEPA predictor (NOT tx encoder, NOT image trunk weights).
+#   - Objective:
+#       * align (JEPA / CLIP / Barlow / CCA / S2L — choose per experiment)
+#       * gene_recon  (tx-side decoder → HVG)
+#       * image_recon (image latent → HVG; SEAL "ImgEmbDecoder")
+#       * tx_self     = 0  (frozen tx encoder; nothing to self-supervise)
+#
+# Required: tx_ckpt must point to a Stage-1 ckpt_tx_encoder.pt.
+# The runner script (train_stage2_align.sh) sets that path through TX_CKPT env
+# var or the first CLI argument.
+#
+# Run:
+#     bash scripts/train/stage2.sh \
+#         results/runs/stage1_ours_tx_stage1_feature/ckpt_tx_encoder.pt
+#     bash scripts/train/stage2.sh <tx_ckpt> --only jepa
+
+sweep:
+  num_processes: 8
+  mixed_precision: bf16
+
+  smoke: false
+  rebuild: false
+  force_prepare: false
+
+  epochs: 100
+  batch_size: 64
+  image_backbone: uni
+  uni_tune: lora
+  tag_prefix: stage2
+
+  # tx_ckpt is filled in at dispatch time by train_stage2_align.sh.
+  # Forwarded to train.py as --tx-ckpt <path>.
+  tx_ckpt: null
+
+  # Optional Loki/HEST/PathBench-style slide-level downstream evaluation.
+  # Leave label_csv null to keep the sweep behavior unchanged. When set,
+  # scripts/sweep.py runs scripts/eval/slide_mil.py after retrieval and
+  # image-to-HVG linear probe.
+  downstream:
+    label_csv: null
+    sample_id_col: sample_id
+    label_col: msi
+    eval_split: test
+    arms: [image, z_image, baseline_uni]
+    attention_epochs: 50
+    skip_attention: false
+
+  experiments:
+    - name: jepa
+    # - name: clip
+    # - name: barlow
+    # - name: cca
+    # - name: s2l

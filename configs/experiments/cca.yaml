@@ -1,0 +1,18 @@
+experiment:
+  name: cca
+  align:
+    method: cca
+    weight: 1.0
+    reg_eps: 1.0e-4
+    scale: 0.01
+  gene_recon:
+    method: barlow_std_mse
+    weight: 1.0
+  image_recon:
+    method: mse
+    weight: 1.0
+
+  tx_self:
+    weight: 0.5
+    ema_momentum: 0.999
+    enable_masked_jepa: true

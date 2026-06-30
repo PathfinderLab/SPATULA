@@ -1,0 +1,15 @@
+model:
+  spatial:
+    arch: kgnn          # kgnn / kxformer / smooth (F2 control)
+    fuse_dim: 256
+    fuse_image: true
+    n_layers: 3
+    n_heads: 4
+    dropout: 0.10
+    # How the region channels are presented to the spatial backbone:
+    #   fused     — SpotFuser collapses spot+region into ONE token per anchor
+    #                (cheap baseline; masking removes spot AND region together).
+    #   separate  — SeparateTokenFuser emits TWO tokens per anchor (spot, region).
+    #                Backbone sees 2N tokens with spot↔region cross-links.
+    #                Required for "predict masked spot from visible region" (R2).
+    region_token_mode: fused

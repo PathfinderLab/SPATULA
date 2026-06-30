@@ -1,0 +1,249 @@
+data:
+  # ── EXPERIMENT KNOBS: edit here for data-side Stage-1 ablations ──
+  #   gene normalization : data.gene_norm.mode
+  #   vocab clipping     : data.vocab_clip.keep_indices_path
+  #   sequence sampling  : data.max_seq_len + data.sampling.strategy
+  #   short sequences    : data.min_seq_len
+  # Keep all other keys fixed when testing one ablation group.
+
+  hest_st_dir: /data/hest/st
+  hest_patch_dir: /data/hest/patches
+  sample_whitelist: /workspace/assets/human_list.txt
+  sources:
+    hest: true
+    st1k: true
+    spatialcorpus: true
+  prepared_dir: /workspace/mm_align/results/cache/prepared_expanded
+  emb_cache_dir: /workspace/mm_align/results/cache/emb
+  image_mode: feature
+  uni_feat_dim: 1536
+  tx_latent_dim: 64
+
+  # ── Vocab clip ablation ─────────────────────────────────────────────
+  # Spot representation can benefit from dense, informative symbols rather
+  # than exhaustive gene coverage. Set null for full vocab.
+  # Options:
+  #   null
+  #   keep_indices_path: /workspace/mm_align/results/cache/prepared_expanded/clip4096_keep_indices.npy
+  #   keep_indices_path: /workspace/mm_align/results/cache/prepared_expanded/clip8192_keep_indices.npy
+  vocab_clip: null
+  # n_hvg is a CAP, not a target.  Set null to keep every gene that survives
+  # the gene_type + prevalence + min_count filters (principle-driven sizing).
+  # Set to an integer to cap by normalized-dispersion ranking when the
+  # filter-survivor pool exceeds the desired token budget.
+  n_hvg: null
+  # Restrict HVG candidate pool to these GTF gene_types BEFORE ranking.
+  # null → legacy "all noise-filter-survivors".
+  restrict_to_gene_types:
+    - protein_coding
+    - IG_C_gene
+    - IG_V_gene
+    - IG_J_gene
+    - IG_D_gene
+    - TR_C_gene
+    - TR_V_gene
+    - TR_J_gene
+    - TR_D_gene
+  # If > 0, also union the top-K most highly-expressed genes (mean raw count)
+  # onto the HVG vocab.  ⚠ DEFAULT OFF — pure house-keeping genes (ACTB, B2M,
+  # GAPDH) carry low information for variability tasks (the NLP "a" problem).
+  heg_top_k: 0
+  # Cross-sample / cross-spot prevalence floors.  Genes seen in too few samples
+  # or too few spots are NLP-rare "hapax legomena" and waste a vocab slot.
+  # With n_hvg=null these are the primary lever controlling vocab size.
+  min_sample_prevalence: 0.02
+  min_spot_prevalence: 0.0005
+  # Upper-bound knobs — kept OFF by default (1.01) because the dispersion
+  # ranking already pushes house-keeping (high-prev + low-variance) to the
+  # bottom of the vocab.  Use these only when sample-level surveys of vocab.csv
+  # justify an explicit cut (e.g. pan-expressed mitochondrial genes).
+  max_sample_prevalence: 1.01
+  max_spot_prevalence: 1.01
+  spatial_radius_px: 600
+  k_spatial: 8
+  splits:
+    train: null
+    val: null
+    test: null
+  limit_samples: null
+  # ── Sequence process ablation ─────────────────────────────────────
+  # Zero-expressed removal is always done in the top_hvg_gene encoder: genes
+  # with value 0 are not words in the spot sentence.
+  # min_seq_len drops spots with too little context after zero-removal + clip.
+  min_seq_len: 8
+  # max_seq_len=0 means keep every non-zero gene. Set e.g. 1024 for long-spot
+  # sampling ablation. If max_seq_len > 0, choose sampling.strategy below.
+  max_seq_len: 0
+  sampling:
+    # Options: random | top_k | weighted. Only active when max_seq_len > 0.
+    strategy: random
+    alpha: 1.0
+    keep_must_include: true
+
+  # ── Gene normalization ablation ────────────────────────────────────
+  # none          : raw hvg_log after spot-level normalize_total+log1p
+  # nonzero_z     : gene-wise z-score over non-zero values, zeros preserved
+  # global_median : Geneformer-style relative salience; divide by per-gene
+  #                 non-zero median, then clip. Good candidate for language-
+  #                 style spot representation; judge with Spearman/rank metrics.
+  gene_norm:
+    mode: global_median
+    stats_path: /workspace/mm_align/results/cache/prepared_expanded/gene_stats.npz
+    eps: 1.0e-06
+    min_scale: 0.05
+    clip: 8.0
+  must_include_genes:
+  - ACTA2
+  - AKT1
+  - ALK
+  - ANGPT1
+  - ANGPT2
+  - APC
+  - AURKA
+  - AXIN2
+  - BAD
+  - BAK1
+  - BAX
+  - BCL2
+  - BRAF
+  - BRCA1
+  - BRCA2
+  - C1QA
+  - C1QB
+  - C1QC
+  - CASP3
+  - CASP8
+  - CASP9
+  - CCNB1
+  - CCND1
+  - CD163
+  - CD3D
+  - CD3E
+  - CD3G
+  - CD4
+  - CD68
+  - CD79A
+  - CD79B
+  - CD8A
+  - CD8B
+  - CDH1
+  - CDH5
+  - CDK1
+  - CDKN1A
+  - CDKN2A
+  - CEACAM5
+  - CLDN5
+  - COL1A1
+  - COL1A2
+  - COL3A1
+  - COL5A1
+  - CTNNB1
+  - DCN
+  - DKK1
+  - DKK2
+  - DKK3
+  - DNAJB1
+  - EGFR
+  - ENG
+  - EPCAM
+  - ERBB2
+  - FAP
+  - FAS
+  - FASLG
+  - FLT1
+  - FN1
+  - FOXO1
+  - FRZB
+  - GZMA
+  - GZMB
+  - HIF1A
+  - HRAS
+  - HSP90AA1
+  - HSP90AB1
+  - HSPA1A
+  - HSPA1B
+  - HSPA5
+  - HSPA8
+  - HSPB1
+  - IFNG
+  - IGHG1
+  - IGHM
+  - IGKC
+  - IL2RA
+  - ITGAM
+  - JCHAIN
+  - KDR
+  - KLF4
+  - KRAS
+  - KRT14
+  - KRT18
+  - KRT19
+  - KRT5
+  - KRT8
+  - LRP5
+  - LRP6
+  - LUM
+  - LYZ
+  - MARCO
+  - MCM2
+  - MCM4
+  - MCM5
+  - MDM2
+  - MEN1
+  - MET
+  - MKI67
+  - MMP1
+  - MMP14
+  - MMP2
+  - MMP3
+  - MMP7
+  - MMP9
+  - MRC1
+  - MS4A1
+  - MSR1
+  - MUC1
+  - MYC
+  - MYCN
+  - NANOG
+  - NF1
+  - NF2
+  - NRAS
+  - OCT4
+  - PCNA
+  - PDGFRA
+  - PDGFRB
+  - PECAM1
+  - PIK3CA
+  - POSTN
+  - POU5F1
+  - PRF1
+  - PROX1
+  - PTEN
+  - RB1
+  - S100A4
+  - SFRP1
+  - SFRP2
+  - SFRP3
+  - SFRP4
+  - SFRP5
+  - SMAD4
+  - SOX2
+  - STK11
+  - TCF7
+  - TIMP1
+  - TIMP2
+  - TOP2A
+  - TP53
+  - TP63
+  - TP73
+  - TRAC
+  - TRBC1
+  - VEGFA
+  - VEGFB
+  - VEGFC
+  - VHL
+  - VIM
+  - VWF
+  - WIF1
+  - WNT3A
+  - WNT5A

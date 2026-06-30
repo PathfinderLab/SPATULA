@@ -1,0 +1,42 @@
+# Sweep dedicated to STAGE 1 — pretrain the OURS gene encoder (top_hvg_gene) ALONE.
+#
+# What this does:
+#   - kind=top_hvg_gene  (symbol embed + Fourier value + Pre-LN Transformer)
+#   - Primary objective: MSM (masked symbol modeling, CE over HVG vocab)
+#   - Auxiliary: predictive JEPA (optional — toggled via experiment yaml)
+#   - Image side: feature MLP mode, frozen — irrelevant for Stage 1
+#   - Saves ckpt_tx_encoder.pt at the run dir for Stage-2 reuse
+#
+# Stage 1 uses the FULL training pool (HEST + ST1K + spatialcorpus, all human).
+#
+# Run:
+#     bash scripts/train/stage1.sh
+
+sweep:
+  num_processes: 8
+  mixed_precision: bf16
+
+  smoke: false
+  rebuild: false
+  force_prepare: false
+
+  # Many epochs — tx encoder from scratch (vocab 19183 symbols).
+  # train.py auto-syncs model.transcriptomics.hvg_in_dim from hvg_vocab.json.
+  epochs: 100
+  batch_size: 256
+  image_backbone: feature
+  uni_tune: none
+  tag_prefix: stage1_ours_tx
+
+  # ── Stage-1 dedicated config files (data/model/train/experiment all in one place) ──
+  # Use the principle-driven configs (vocab 19183 with prevalence filters,
+  # ENSG resolve, MT/RPS/RPL never-rescue).  data_4k.yaml/model_4k.yaml are
+  # the legacy 4096-vocab configs kept for reference only.
+  data_yaml:       configs/stage1/data.yaml
+  model_yaml:      configs/stage1/model.yaml
+  train_yaml:      configs/stage1/train.yaml
+  experiment_yaml: configs/stage1/experiment.yaml
+
+  # The runner script (train_ours_tx.sh) injects stage1_only=true automatically.
+  experiments:
+    - name: stage1     # name only used for the tag; experiment_yaml above is what's loaded

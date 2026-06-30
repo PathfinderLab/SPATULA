@@ -1,0 +1,89 @@
+# PDF "Main-candidate" model config — pairs with experiment_main.yaml.
+# Only delta vs configs/stage1/model.yaml: the top_hvg_gene.value_aug block
+# (C4 — 80% keep / 10% noise / 10% drop).
+model:
+  embed_dim: 512
+
+  image:
+    backbone: feature
+    in_dim: 1536
+    hidden_dim: 1024
+    n_layers: 2
+    dropout: 0.1
+    foundation:
+      name: uni
+      weights_path: /workspace/mm_align/assets/uni2-h.bin
+      tune: none
+      partial_blocks: 1
+      adapter_bottleneck: 256
+      apply_transform_in_model: true
+      lora:
+        r: 8
+        lora_alpha: 8
+        lora_dropout: 0.15
+        use_rslora: false
+
+  transcriptomics:
+    kind: top_hvg_gene
+    use_novae: true
+    use_hvg: true
+    novae_in_dim: 64
+    hvg_in_dim: 2048           # auto-synced from hvg_vocab.json at train time
+    hidden_dim: 1024
+    n_layers: 2
+    dropout: 0.1
+    freeze: false
+
+    top_hvg_gene:
+      vocab_path: null
+      dim: 256
+      fourier_dim: 64
+      fourier_scale: 1.0
+      n_layers: 4
+      n_heads: 4
+      dropout: 0.1
+      mask_ratio: 0.30          # overridden by experiment_main.tokenizer.mask_ratio anyway
+      mask_kind: symbol
+      # ─── Split value augmentation ───
+      # Design philosophy (Sinha et al. 2021 EMNLP):
+      #   * gene-value co-occurrence is THE distributional signal the MLM
+      #     actually learns. Noise on the value (Gaussian perturbation) WARPS
+      #     this distribution and is the worst augmentation we can apply.
+      #   * Token-level dropout (set value=0, keep symbol) REMOVES the signal
+      #     for that gene but does not corrupt the rest of the distribution.
+      #     This is the analogue of BERT-style "10% random token" in our
+      #     unordered gene setting.
+      #   * Therefore: noise_p=0 by default; small drop_p only at masked
+      #     positions to break the value→symbol shortcut.
+      value_aug:  # legacy fallback for older scripts
+        mode: mixed
+        keep_p: 0.85
+        noise_p: 0.0
+        drop_p: 0.15
+        noise_std: 0.0
+      masked_value_aug:
+        mode: mixed
+        keep_p: 0.85           # main signal preserved
+        noise_p: 0.0           # NO noise — corrupts co-occurrence
+        drop_p: 0.15           # token-level dropout (value=0, symbol kept)
+        noise_std: 0.0         # moot
+      unmasked_value_aug:
+        mode: keep             # context untouched — preserves distributional prior
+        keep_p: 1.0
+        noise_p: 0.0
+        drop_p: 0.0
+        noise_std: 0.0
+
+  projector:
+    kind: mlp
+    hidden_dim: 1024
+    out_dim: 512
+    n_layers: 2
+    bias: false
+    last_bn: false
+
+  decoder:
+    enable_image_decoder: false
+    img_hid_dim: 512
+    img_batch_norm: false
+    img_dropout: 0.0

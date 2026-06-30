@@ -1,0 +1,58 @@
+experiment:
+  name: jepa
+  align:
+    method: jepa
+    weight: 1.0
+
+    # EMA target — slow target prevents collapse. 0.999 gave best val/loss in
+    # earlier runs; we keep it.
+    ema_momentum: 0.999
+    pred_hidden: 512
+    pred_layers: 2
+
+    use_align_jepa: true
+
+    # ── Spatial-JEPA OFF (per ablation request) ──
+    # Spatial smoothness leaks into align and accelerates organ-level collapse;
+    # disabling it forces align-JEPA to learn spot-specific signal.
+    use_spatial_jepa: false
+    align_branch_weight: 1.0
+    spatial_weight: 0.0
+
+    # ── In-batch CLIP negatives — stronger ──
+    # Was 0.2 (light regulariser).  Bump to 1.0 (full hybrid CLIP-JEPA) so the
+    # encoder gets a fine-grained per-spot positive vs. in-batch negatives signal
+    # rather than only the smooth cosine-to-EMA target.
+    negative_weight: 1.0
+    nce_temperature_init: 0.07
+
+    # ── Anti-collapse — stronger ──
+    # Was 4.0 / 0.5.  Double them: spot-level diversity gets penalised hardest
+    # when the model tries to collapse all spots of an organ to one point.
+    var_weight: 8.0
+    cov_weight: 1.0
+    var_target: 1.0
+
+  # ── Gene/Image recon — much smaller weight ──
+  # Both recon terms have scale_factor=10 baked in (SEAL convention to match
+  # InfoNCE magnitude).  At weight 0.3 they were dominating align.  Reducing
+  # so alignment can drive the representation.
+  gene_recon:
+    method: barlow_std_mse
+    weight: 0.05
+  image_recon:
+    method: mse
+    weight: 0.10
+
+  # ── Tx-side self-supervision — smaller weight + lower mask ratio ──
+  # When tx_kind = top_hvg_gene this fires; novae_adapter ignores it.  Was 0.5.
+  # At 0.5 it overwhelmed the alignment signal in ours_tx_jepa (val_loss
+  # diverged from epoch 2).  0.1 keeps the gene encoder learning without
+  # dragging the cross-modal alignment off-course.
+  tx_self:
+    weight: 0.1
+    ema_momentum: 0.999
+    enable_masked_jepa: true
+    symbol_weight: 1.0
+    value_weight: 0.5
+    jepa_weight: 1.0

@@ -1,0 +1,18 @@
+experiment:
+  name: barlow
+  align:
+    method: barlow
+    weight: 1.0
+    lambd: 5.0e-3
+    scaling: 0.05
+  gene_recon:
+    method: barlow_std_mse
+    weight: 1.0
+  image_recon:
+    method: mse
+    weight: 1.0
+
+  tx_self:
+    weight: 0.5
+    ema_momentum: 0.999
+    enable_masked_jepa: true

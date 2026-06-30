@@ -1,0 +1,18 @@
+train:
+  seed: 42
+  output_dir: /workspace/mm_align/results/runs
+  mixed_precision: bf16
+  epochs: 30
+  batch_size: 32     # samples per step (each yields one subgraph)
+  num_workers: 4
+  prefetch_factor: 4
+  pin_memory: true
+  persistent_workers: true
+  shuffle: true
+
+  lr: 1.0e-4
+  weight_decay: 0.05
+  max_grad_norm: 1.0
+  warmup_epochs: 1.0
+  min_lr_ratio: 0.10
+  early_stop_patience: 5

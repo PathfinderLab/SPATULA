@@ -1,0 +1,15 @@
+experiment:
+  name: stage15_spatial
+  jepa:
+    mask_ratio: 0.40         # ST-JEPA reports 0.6 as sweet spot; 0.40 = moderate start
+    mask_strategy: block     # random / block (ST-JEPA-style connected blocks)
+    block_size: 8            # cells per masked block (only used when strategy=block)
+    # Which token stream gets masked (separate-token mode only):
+    #   spot   — mask spot tokens; predict from visible region context.  Main R2 candidate.
+    #   region — mask region tokens; predict from visible spots.
+    #   both   — mask spot AND region of the same anchor together (block-style).
+    # In fused-token mode this is implicitly "the cell-level token" — only `spot`/`both` are valid.
+    mask_target: spot
+    loss: smooth_l1          # smooth_l1 / cosine
+    smoothness_weight: 0.0   # set > 0 for F4 control (spatial smoothness aux)
+    ema_momentum: 0.999

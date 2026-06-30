@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Project — generated artefacts (large, regen-able)
+results/cache/
+results/runs/
+results/eda/
+results/eval/
+results/figures/
+*.h5
+*.h5ad
+*.npy
+!references/**/*.npy
+
+# Local secrets / env
+.env
+.env.local
+*.local.yaml
+
+# Large/local model assets
+assets/*.bin
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+# External reference clones and local benchmark/data checkouts
+HEST/
+SEAL/
+spatula/
+# Generated or legacy working directories
+legacy_run/
+**/__pycache__/
+
+results/
+references/

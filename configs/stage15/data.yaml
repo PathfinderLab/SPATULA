@@ -1,0 +1,55 @@
+data:
+  # Reuse Stage 1 shards (no re-prepare needed).
+  prepared_dir: /workspace/mm_align/results/cache/prepared_expanded
+  # Frozen Stage-1 tx encoder for h_tx extraction.
+  stage1_ckpt: /workspace/mm_align/results/runs/stage1_ours_tx_stage1_feature/ckpt_tx_encoder_best.pt
+  # Image features come from each shard's /uni_feat (1536-d UNI).
+  use_image: true
+
+  # Frozen Stage-1 tx_encoder micro-batch for cache building and region_hvg -> h_region_tx.
+  # This is separate from train.batch_size. Keep conservative because Stage-1
+  # tx_encoder attention scales with sequence length squared.
+  tx_encode_batch: 256
+
+  graph:
+    kind: knn         # knn / radius / grid
+    k: 8
+    radius_px: 600
+
+  # ── Region tokens (Stage 1.5 "anchor spot + k neighbors") ─────────────
+  # When enabled, the SpatialEncoder sees an extra region_tx + region_img
+  # per anchor — making it a 4-token-per-cell fuser (vs 2 before).
+  region:
+    enable: true
+    k: 8              # # neighbors per anchor (defaults to graph.k)
+    # tx_agg: how to combine the anchor's hvg_log with its neighbors':
+    #   mean       — Σ log1p(x) / (k+1)                 (PDF HyperST default)
+    #   sum_log1p  — log1p( Σ expm1(log1p(x)) )         (sum in raw count space)
+    #   weighted   — exp(-d/σ) weighted mean of log1p
+    tx_agg: mean
+    weighted_sigma: 1.0
+    # img_pool: how to pool neighbor UNI features:
+    #   mean — average uni_feat (cheap, no UNI re-forward)
+    #   attn — learned attention pool (TODO; falls back to mean)
+    img_pool: mean
+    # include_anchor: whether the anchor spot itself is part of its region.
+    #   false (default) — region = neighbours-only.  REQUIRED for JEPA
+    #                     "predict masked spot from visible region context"
+    #                     (separate token + mask_target=spot).  Otherwise
+    #                     anchor RNA/image leaks into the visible region.
+    #   true            — HyperST "niche" definition (anchor + neighbours).
+    #                     Acceptable in fused-token mode since the whole
+    #                     cell-level token is masked together.
+    include_anchor: false
+
+  subgraph_size: 256
+  # How a subgraph is sampled from a shard each step:
+  #   random — random subset, then KNN rebuilt over the subset (cheap; the
+  #             "neighbours" may not be true tissue neighbours).
+  #   ego    — sample-level KNN (cached) + BFS ego subgraph from a random
+  #             centre.  Reflects real tissue locality; matches HyperST /
+  #             ST-JEPA neighbourhood semantics.  Recommended.
+  subgraph_kind: random
+  splits:
+    train: null     # reuse splits.json next to prepared_dir
+    val: null

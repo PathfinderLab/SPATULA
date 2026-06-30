@@ -1,0 +1,97 @@
+model:
+  # ── EXPERIMENT KNOBS: edit here for model-side Stage-1 ablations ──
+  #   value augmentation: model.transcriptomics.top_hvg_gene.value_aug
+  #   encoder capacity   : hidden_dim / top_hvg_gene.{dim,n_layers,n_heads}
+  # Keep capacity fixed when testing value augmentation.
+
+  embed_dim: 512
+
+  # ── Image side (unused in Stage 1 — feature MLP path with frozen image weights) ──
+  image:
+    backbone: feature           # cheap precomputed UNI features; no UNI forward
+    in_dim: 1536
+    hidden_dim: 1024
+    n_layers: 2
+    dropout: 0.1
+    foundation:
+      name: uni
+      weights_path: /workspace/mm_align/assets/uni2-h.bin
+      tune: none                # ignored in feature mode
+      partial_blocks: 1
+      adapter_bottleneck: 256
+      apply_transform_in_model: true
+      lora:
+        r: 8
+        lora_alpha: 8
+        lora_dropout: 0.15
+        use_rslora: false
+
+  # ── Transcriptomics — Stage 1's actual training target ──
+  transcriptomics:
+    kind: top_hvg_gene          # symbol-emb + Fourier value-emb + Pre-LN transformer
+    use_novae: true             # buffer (not used in Stage 1)
+    use_hvg: true
+    novae_in_dim: 64
+    hvg_in_dim: 2048
+    hidden_dim: 1024
+    n_layers: 2
+    dropout: 0.1
+    freeze: false
+
+    # ── top_hvg_gene encoder hyperparams ──
+    # mask_ratio and mask_kind are overridden at runtime from
+    # configs/stage1/experiment.yaml::tokenizer + tx_self.masking_obj —
+    # the values here are fallback defaults only.
+    top_hvg_gene:
+      vocab_path: null          # default → ${data.prepared_dir}/hvg_vocab_dict.json
+      dim: 256
+      fourier_dim: 64
+      fourier_scale: 1.0
+      n_layers: 4
+      n_heads: 4
+      dropout: 0.1
+      mask_ratio: 0.15          # ← BERT default; experiment yaml can override
+      mask_kind: symbol         # ← PDF default (mask gene_id, keep value)
+      # Spot readout. `cls` preserves current behavior. For checkpoint-compatible
+      # eval ablations, try `cls_token_mean_sum` (Prov-GigaPath-style CLS + token mean).
+      pooling_mode: cls         # cls | token_mean | cls_token_mean_sum | cls_token_mean_avg
+
+      # ── Value augmentation ablation ────────────────────────────────
+      # Split by token role under symbol masking:
+      #   masked_value_aug   : [MASK] target gene's expression value
+      #   unmasked_value_aug : context genes' expression values
+      # Legacy value_aug is kept as a compatibility fallback and maps to
+      # masked_value_aug if the split blocks are absent.
+      value_aug:
+        mode: keep
+        keep_p: 1.0
+        noise_p: 0.0
+        drop_p: 0.0
+        noise_std: 1.0
+      masked_value_aug:
+        mode: keep
+        keep_p: 1.0
+        noise_p: 0.0
+        drop_p: 0.0
+        noise_std: 1.0
+      unmasked_value_aug:
+        mode: keep
+        keep_p: 1.0
+        noise_p: 0.0
+        drop_p: 0.0
+        noise_std: 0.15
+
+  # ── Projectors (unused in Stage 1 with align_weight=0) ──
+  projector:
+    kind: mlp
+    hidden_dim: 1024
+    out_dim: 512
+    n_layers: 2
+    bias: false
+    last_bn: false
+
+  decoder:
+    enable_image_decoder: false  # OFF in Stage 1 (no image-recon loss)
+    img_hid_dim: 512
+    img_batch_norm: false
+    img_dropout: 0.0

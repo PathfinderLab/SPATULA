@@ -1,0 +1,169 @@
+experiment:
+  # ── EXPERIMENT KNOBS: edit here for objective-side Stage-1 ablations ──
+  #   objective       : tx_self.masking_obj / symbol_weight / value_weight
+  #   Gene-JEPA       : tx_self.enable_masked_jepa / jepa_weight
+  #   DINO consistency: tx_self.enable_dino_consistency / dino_weight
+  #   mask ratio      : tokenizer.mask_ratio
+  #   eval cadence    : monitor.* (or train.py CLI overrides)
+  # Keep data/model YAML fixed when testing objective-side variants.
+
+  name: stage1
+
+  # ──────────────────────────────────────────────────────────────────
+  # Stage-1 experiment yaml — follows docs/archive/contexts/spatula_research_overview.pdf
+  #
+  #   Primary  = MSM (Masked Symbol Modeling) — cross-entropy over HVG vocab
+  #   Optional = DINO-style teacher-student consistency at the spot level
+  #   Optional = Predictive Gene-JEPA — EMA target encoder, smooth-L1 in latent
+  #   Common ablation: MSM only vs MSM + DINO consistency
+  #
+  # train.py with --stage1-only forces align/gene_recon/image_recon weights
+  # to 0 regardless of values below (those blocks kept only for constructor).
+  # ──────────────────────────────────────────────────────────────────
+  align:
+    method: jepa
+    weight: 0.0
+    ema_momentum: 0.999
+    pred_hidden: 512
+    pred_layers: 2
+    use_align_jepa: false
+    use_spatial_jepa: false
+    align_branch_weight: 0.0
+    spatial_weight: 0.0
+    negative_weight: 0.0
+    nce_temperature_init: 0.07
+    var_weight: 0.0
+    cov_weight: 0.0
+    var_target: 1.0
+
+  gene_recon:
+    method: mse
+    weight: 0.0
+
+  image_recon:
+    method: mse
+    weight: 0.0
+
+  # ── Stage-1 objective configuration ──
+  tx_self:
+    weight: 1.0
+
+    # ── Objective ablation ───────────────────────────────────────────
+    # MSM only      : masking_obj=symbol, symbol_weight=1.0, value_weight=0.0
+    # MVM only      : masking_obj=value,  symbol_weight=0.0, value_weight=1.0
+    # MSM+MVM       : masking_obj=both,   symbol_weight=1.0, value_weight=1.0
+    # Recommended foundation objective is MSM; keep MVM mostly as downstream
+    # expression-prediction/evaluation signal.
+    #   "symbol" → mask gene_id, keep/augment value (BERT-style)
+    #   "value"  → mask value, keep gene_id
+    #   "both"   → mask both
+    masking_obj: symbol
+    symbol_weight: 1.0
+    value_weight: 0.0
+
+    # ── DINO-style consistency ablation ──────────────────────────────
+    # msm_only : enable_dino_consistency=false, dino_weight=0.0
+    # msm_dino : enable_dino_consistency=true with delayed/ramped aux losses.
+    # Current recommended candidate after validation drift:
+    #   dino_weight=0.05, koleo_weight=0.01, warmup=5 epochs, ramp=5 epochs.
+    # Sinkhorn is disabled in code until a high-dimensional DINO head is added.
+    # Teacher view is clean/unmasked expression; student view is masked +
+    # value-augmented expression. Keep this independent from Gene-JEPA.
+    enable_dino_consistency: false
+    dino_weight: 0.0
+    dino_loss: cosine  # cosine | smooth_l1
+    dino_student_temp: 0.1
+    dino_teacher_temp: 0.04
+    sinkhorn_iterations: 3
+    # Auxiliary warmup: keep early epochs MSM-only, then ramp up consistency.
+    dino_warmup_epochs: 0
+    dino_ramp_epochs: 0
+    koleo_weight: 0.0
+    koleo_eps: 1.0e-6
+    koleo_warmup_epochs: 0
+    koleo_ramp_epochs: 0
+
+    # ── Gene-JEPA ablation ───────────────────────────────────────────
+    # off   : enable_masked_jepa=false, jepa_weight=0.0
+    # lite  : enable_masked_jepa=true,  jepa_weight=0.1
+    # paper : enable_masked_jepa=true,  jepa_weight=0.3
+    enable_masked_jepa: false
+    jepa_weight: 0.0
+
+    # View-JEPA/data2vec-style spot consistency. This is preferred over
+    # direct DINO when adding a clean-vs-corrupted view objective to Stage 1.
+    enable_view_jepa: false
+    view_jepa_weight: 0.0
+    view_jepa_loss: smooth_l1
+    view_jepa_hidden_dim: 1024
+    view_jepa_warmup_epochs: 0
+    view_jepa_ramp_epochs: 0
+
+    # Multi-chunk Gene-JEPA. Same-spot non-zero gene sequence is split into
+    # context/target chunks. The JEPA target is target-chunk latent(s), while
+    # z_spot is obtained later by pooling chunk embeddings for eval/inference.
+    enable_multi_chunk_jepa: false
+    multi_chunk_weight: 0.0
+    multi_chunk_n_chunks: 4
+    multi_chunk_len: 256
+    # target_chunk: I-JEPA-style context chunk(s) predict multiple target
+    # chunks separately. Targets are not averaged before the loss.
+    # spot_aggregate is kept only as a shortcut-risk ablation.
+    multi_chunk_target: target_chunk
+    multi_chunk_dynamic: true
+    # auto/ijepa: use one context chunk and the remaining slots as multiple
+    # target chunks, similar to I-JEPA's one context block + multi-block target.
+    multi_chunk_target_chunks: auto
+    # Variable chunk scales as fractions of each spot's expressed-gene sequence.
+    # Target blocks are smaller; context is sampled from the target complement
+    # when possible. `multi_chunk_len` remains a hard upper bound.
+    multi_chunk_target_scale: [0.15, 0.25]
+    multi_chunk_context_scale: [0.45, 0.65]
+    multi_chunk_loss: smooth_l1
+    multi_chunk_hidden_dim: 1024
+    # Target gene-list query is analogous to I-JEPA target position embedding,
+    # but gene identity is more informative than a pixel/block coordinate. Keep
+    # it scaled so context values still matter. Target expression values are
+    # never given to the predictor; they are the semantic content to infer.
+    multi_chunk_target_id_scale: 0.25
+    # Anti-collapse regularizer for context/predicted chunk latents. GeneJEPA
+    # uses VICReg-style variance/covariance regularization; KoLeo remains as a
+    # legacy ablation option.
+    multi_chunk_regularizer: none     # none | vicreg | koleo
+    multi_chunk_koleo_weight: 0.0
+    # Keep VICReg as a small anti-collapse stabilizer. Larger values can
+    # dominate MSM and make the JEPA branch look good while spot probes degrade.
+    multi_chunk_vicreg_var_weight: 0.05
+    multi_chunk_vicreg_cov_weight: 0.01
+    multi_chunk_vicreg_gamma: 1.0
+    multi_chunk_warmup_epochs: 5
+    multi_chunk_ramp_epochs: 5
+    ema_momentum: 0.999
+
+  # ── Mask-ratio ablation ───────────────────────────────────────────
+  # train.py with --stage1-only propagates this into
+  # model.transcriptomics.top_hvg_gene.mask_ratio at runtime.
+  # Common variants: 0.15, 0.30, 0.50.
+  tokenizer:
+    mask_ratio: 0.15
+
+  # ── Validation-time monitoring ────────────────────────────────────
+  # train.val_every_epoch controls the cheap validation pass. Keep it frequent.
+  # stage1_quick_every controls expensive quick evals: HVG linear probes,
+  # masked-HVG probes, expression manifold, gene-embedding alignment, leakage.
+  # Full 100-epoch runs commonly use quick_every=5 or 10.
+  # CLI overrides:
+  #   --stage1-quick-every 10 --stage1-clean-msm-every 1 --gene-set-every 0
+  monitor:
+    # Curated marker-panel sanity check. Auxiliary only; not a primary selector.
+    gene_set_every: 5
+    # Primary ablation selector. More expensive than val loss/MSM top-k.
+    stage1_quick_every: 5
+    stage1_quick_max_spots: 5000
+    stage1_quick_n_genes: 256
+    # Clean MSM top-k/loss with value augmentation disabled. This keeps
+    # normalization/value-augmentation ablations comparable during training.
+    stage1_clean_msm_every: 1
+    # Optional organ/source benchmark. Disabled by default because organ probe
+    # is often trivial and should not drive Stage-1 ablation selection.
+    stage1_bench_every: 0

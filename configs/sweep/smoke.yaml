@@ -1,0 +1,21 @@
+# Smoke sweep — 6 samples, 1 epoch.
+sweep:
+  num_processes: 1
+  mixed_precision: bf16
+
+  smoke: true
+  rebuild: false
+  force_prepare: false
+
+  epochs: 50
+  batch_size: 128
+  image_backbone: uni        # fast path
+  uni_tune: lora
+  tag_prefix: smoke
+
+  experiments:
+    - name: clip
+    - name: barlow
+    - name: cca
+    - name: s2l
+    - name: jepa

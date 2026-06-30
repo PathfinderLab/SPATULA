@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mm_align"
+version = "0.1.0"
+description = "Multimodal spatial transcriptomics foundation model (SPATULA)"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "SPATULA contributors" }]
+license = { text = "Proprietary" }
+
+# Runtime dependencies are heavy ML libs that are environment-specific.
+# Project assumes a pre-built CUDA / PyTorch env; we keep extras lean.
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.10",
+    "scikit-learn>=1.3",
+    "scanpy>=1.10",
+    "anndata>=0.10",
+    "h5py>=3.9",
+    "pyyaml>=6.0",
+    "tqdm>=4.66",
+    "matplotlib>=3.7",
+    "seaborn>=0.13",
+]
+
+[project.optional-dependencies]
+viz = ["python-pptx>=1.0", "pdfplumber>=0.10"]
+dev = ["pytest>=7", "ruff>=0.5"]
+
+# ---------------------------------------------------------------------------
+# Package discovery — keep imports as `mm_align.<submodule>` from src/ layout.
+# Repo root is /workspace/mm_align (not a Python package).  Python package
+# namespace is `mm_align`, sourced from src/mm_align/.
+# ---------------------------------------------------------------------------
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mm_align*"]
+
+# ---------------------------------------------------------------------------
+# Optional tools
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = ["references", "results", "configs/_archive", "docs/archive",
+            "scripts/_archive", "**/__pycache__"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"

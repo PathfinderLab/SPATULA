@@ -1,0 +1,18 @@
+experiment:
+  name: clip
+  align:
+    method: clip
+    weight: 1.0
+    temperature_init: 0.07
+    learn_temperature: true
+  gene_recon:                   # tx-side gene auto-encoder reconstruction
+    method: barlow_std_mse      # SEAL default
+    weight: 1.0
+  image_recon:                  # image-side ImgEmbDecoder reconstruction (HVG)
+    method: mse
+    weight: 1.0
+
+  tx_self:
+    weight: 0.5
+    ema_momentum: 0.999
+    enable_masked_jepa: true

@@ -1,0 +1,92 @@
+# PDF "Main-candidate" Stage-1 config — overrides the conservative baseline.
+#
+# Differences vs configs/stage1/experiment.yaml:
+#   * mask_ratio          0.15  (best current Stage-1 mask ablation)
+#   * value_aug           keep  →  mixed  (PDF C4 — 80% keep / 10% noise / 10% drop)
+#   * DINO/KoLeo aux      off   →  warmup DINO cosine + light KoLeo
+#   * enable_masked_jepa  off   →  off for the current msm_dino main
+#
+# Per PDF p.6 "Recommended grid: B2 × C4 main candidate" + p.8 E2.
+#
+# Note: value_aug knobs live in model.yaml's
+#       transcriptomics.top_hvg_gene.value_aug, NOT here — switch model
+#       file when launching this candidate (see configs/stage1/model_main.yaml).
+#
+# Launch:
+#     accelerate launch --num_processes 8 --mixed_precision bf16 \
+#         scripts/train.py \
+#             --experiment configs/stage1/experiment_main.yaml \
+#             --model      configs/stage1/model_main.yaml \
+#             --data       configs/stage1/data.yaml \
+#             --train      configs/stage1/train.yaml \
+#             --tag        stage1_main_candidate \
+#             --epochs     50 \
+#             --image-backbone feature --stage1-only
+
+experiment:
+  name: stage1_main_candidate
+
+  align:
+    method: jepa
+    weight: 0.0
+    ema_momentum: 0.999
+    pred_hidden: 512
+    pred_layers: 2
+    use_align_jepa: false
+    use_spatial_jepa: false
+    align_branch_weight: 0.0
+    spatial_weight: 0.0
+    negative_weight: 0.0
+    nce_temperature_init: 0.07
+    var_weight: 0.0
+    cov_weight: 0.0
+    var_target: 1.0
+
+  gene_recon:
+    weight: 0.0
+  image_recon:
+    weight: 0.0
+
+  tx_self:
+    weight: 1.0
+    masking_obj: symbol            # PDF foundation = MSM
+    symbol_weight: 1.0
+    value_weight: 0.0              # MVM kept for downstream imputation only
+    # DINO + KoLeo main candidate: let MSM shape expression geometry first,
+    # then add weak spot-level consistency/diversity.
+    # NOTE: sinkhorn mode is currently disabled (see masked.py); cosine only.
+    enable_dino_consistency: true
+    dino_weight: 0.05
+    dino_loss: cosine
+    dino_student_temp: 0.1
+    dino_teacher_temp: 0.04
+    sinkhorn_iterations: 3          # unused — sinkhorn disabled
+    dino_warmup_epochs: 5
+    dino_ramp_epochs: 5
+    koleo_weight: 0.01
+    koleo_eps: 1.0e-6
+    koleo_warmup_epochs: 5
+    koleo_ramp_epochs: 5
+    enable_masked_jepa: false
+    jepa_weight: 0.0
+
+    # View-JEPA/data2vec-style spot consistency. This is preferred over
+    # direct DINO when adding a clean-vs-corrupted view objective to Stage 1.
+    enable_view_jepa: false
+    view_jepa_weight: 0.0
+    view_jepa_loss: smooth_l1
+    view_jepa_hidden_dim: 1024
+    view_jepa_warmup_epochs: 0
+    view_jepa_ramp_epochs: 0
+    ema_momentum: 0.999
+
+  tokenizer:
+    mask_ratio: 0.15               # BERT-style default; best current Stage-1 mask ablation
+
+  monitor:
+    gene_set_every: 1
+    stage1_quick_every: 1
+    stage1_quick_max_spots: 5000
+    stage1_quick_n_genes: 256
+    stage1_clean_msm_every: 1
+    stage1_bench_every: 0

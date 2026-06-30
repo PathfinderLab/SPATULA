@@ -1,0 +1,39 @@
+# Stage-2 downstream evaluation task template.
+# Used with scripts/eval/slide_mil.py. Keep model training frozen; this trains
+# only lightweight downstream heads over extracted slide bags.
+
+eval:
+  stage: stage2
+  downstream:
+    # Replace with a HEST/PathBench/SEAL-style task CSV.
+    # Required columns: sample_id_col and label_col below.
+    label_csv: /path/to/slide_task_labels.csv
+    sample_id_col: sample_id
+
+    # Examples: msi, tumor_subtype, disease_state, survival_bin.
+    label_col: msi
+
+    # val or test. Test should be used for final reporting only.
+    eval_split: test
+
+    # image: h_image, z_image: projected alignment space,
+    # baseline_uni: frozen UNI feature baseline, multimodal: h_image+h_tx.
+    arms:
+      - image
+      - z_image
+      - baseline_uni
+
+    min_spots: 8
+    batch_size: 256
+    attention_epochs: 50
+
+  metrics:
+    binary:
+      - auroc
+      - auprc
+      - balanced_acc
+      - f1_macro
+    multiclass:
+      - auroc_ovr
+      - balanced_acc
+      - f1_macro
