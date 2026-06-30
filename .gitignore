@@ -53,3 +53,14 @@ legacy_run/
 
 results/
 references/
+
+# Local archives and generated report binaries
+.claude/
+configs/_archive/
+scripts/_archive/
+scripts/ablation/*legacy*.sh
+docs/archive/legacy_notes/
+docs/archive/legacy_configs/
+docs/archive/contexts/*.pdf
+docs/reports/*.pdf
+docs/reports/*.docx
