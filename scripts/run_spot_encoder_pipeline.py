@@ -382,6 +382,7 @@ def _eval_dlpfc(args, root: Path, ckpts: list[Path]) -> None:
         "--cluster-methods", args.dlpfc_cluster_methods,
         "--spatial-cluster-weight", str(args.dlpfc_spatial_cluster_weight),
         "--tx-pooling-mode", args.stage1_tx_pooling_mode,
+        "--encode-batch", str(args.stage1_encode_batch),
     ]
     if args.neural_linear_probe:
         cmd += [

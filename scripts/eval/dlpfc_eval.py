@@ -57,9 +57,20 @@ log = get_logger("dlpfc_eval")
 @torch.no_grad()
 def _encode_h_tx(enc, x: np.ndarray, batch: int = 256, device: str = "cuda") -> np.ndarray:
     out = []
-    for r0 in range(0, x.shape[0], batch):
-        xb = torch.from_numpy(x[r0:r0 + batch].astype(np.float32)).to(device)
-        out.append(enc(novae_latent=None, hvg=xb)["h_tx"].detach().cpu().numpy())
+    cur_batch = max(1, int(batch))
+    r0 = 0
+    while r0 < x.shape[0]:
+        try:
+            xb = torch.from_numpy(x[r0:r0 + cur_batch].astype(np.float32)).to(device)
+            out.append(enc(novae_latent=None, hvg=xb)["h_tx"].detach().cpu().numpy())
+            r0 += cur_batch
+        except torch.cuda.OutOfMemoryError:
+            if device.startswith("cuda"):
+                torch.cuda.empty_cache()
+            if cur_batch <= 1:
+                raise
+            cur_batch = max(1, cur_batch // 2)
+            log.warning("DLPFC h_tx encode OOM; retrying with encode_batch=%d", cur_batch)
     return np.concatenate(out, axis=0).astype(np.float32)
 
 
@@ -75,7 +86,7 @@ def _encode_representations(enc, x_norm: np.ndarray, reps: list[str], *,
             n_chunks=chunk_n,
             chunk_len=chunk_len,
             dynamic=True,
-            batch_size=min(batch, 128),
+            batch_size=max(1, min(batch, 32)),
             max_spots=max(1, x_norm.shape[0]),
             seed=seed,
             device=device,
@@ -635,7 +646,7 @@ def main() -> None:
                     help="Per-cluster top markers for Moran's I / Geary's C reporting.")
     ap.add_argument("--spatial-k", type=int, default=6,
                     help="KNN for spatial weight matrix (Moran's I / Geary's C).")
-    ap.add_argument("--encode-batch", type=int, default=256)
+    ap.add_argument("--encode-batch", type=int, default=16)
     ap.add_argument("--neural-linear-probe", action="store_true",
                     help="Also fit a trainable nn.Linear layer probe with early stopping.")
     ap.add_argument("--neural-probe-epochs", type=int, default=50)
